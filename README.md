@@ -1,324 +1,384 @@
-# 全身姿态关键点定位与动作评估系统
+# Design and Implementation of a Deep Learning-Based Whole-Body Pose Estimation System
+[English](README.md) | [简体中文](README.zh-CN.md)
+An undergraduate dissertation project integrating **RTMW-M whole-body pose estimation** with a **Django + Vue 3 + Element Plus** web application. The system estimates **133 keypoints**, performs geometric posture analysis for five exercise types, and supports image, video and live-camera pose estimation.
 
-基于 **Django + Vue 3 + Element Plus** 的 Web 应用：在 WholeBody（133 关键点）姿态估计结果之上，完成动作几何分析、可选的大模型评分、历史记录与趋势可视化；支持图片、视频与实时摄像头三类检测入口，并提供管理员控制台。
+The application also provides optional large language model (LLM) feedback, detection history, trend visualisation and an administrator dashboard.
 
----
+## Research and Project Highlights
 
-## 1. 功能概览
+- Fine-tuned a pretrained **RTMW-M** model using **MMPose** on **COCO-WholeBody**, achieving a **validation AP of 0.604** and selecting the best-performing checkpoint for system integration.
+- Implemented geometric analysis for **squats, planks, push-ups, glute bridges and sit-ups**, using predicted keypoints to calculate joint angles, assess alignment and symmetry, and generate structured posture feedback for static images.
+- Developed a Django–Vue application supporting image, video and live-camera inference, skeleton visualisation, detection history and role-based access control.
+- Added optional **Doubao LLM feedback** based on structured geometric analysis. This service is separate from the pose estimation model and is not required for geometric analysis.
 
-### 1.1 用户侧
+> **Repository scope:** Source code, model configurations, training scripts and sample images are included. Dataset files, model weights, local environments and generated runtime files are excluded. Running pose inference requires a compatible model checkpoint, which is not supplied in this repository.
 
-| 能力 | 说明 |
-|------|------|
-| 注册 / 登录 | JWT 鉴权；统一认证入口 `/auth`（含登录与注册 Tab） |
-| 首页 | 系统能力介绍与快捷入口 |
-| 图片检测 | 上传图片，选择动作类型，推理、可视化、评分展示、结果图下载 |
-| 视频姿态检测 | 上传视频，抽帧间隔配置，异步任务与进度轮询，结果视频下载 |
-| 实时检测 | WebSocket 优先，HTTP 帧推理回退；摄像头画面与骨架叠加 |
-| 检测历史 | 筛选、分页、详情、删除；**CSV / Excel 导出**（需携带登录 Token，由前端请求触发下载） |
-| 动作历史 | 按动作类型筛选的评分与指标摘要 |
-| 趋势分析 | ECharts：评分与关键指标趋势 |
-| 个人信息 | `GET/PUT /api/auth/me/`（邮箱、头像等，以实际接口为准） |
+## 1. Features
 
-### 1.2 支持的动作类型（`action_type`）
+### 1.1 User Features
 
-后端统一集合：`squat`、`plank`、`pushup`、`glute_bridge`、`situp`。
+| Feature | Description |
+| --- | --- |
+| Registration and login | JWT authentication through the unified `/auth` page, with login and registration tabs |
+| Home page | System introduction and shortcuts to core features |
+| Image inference | Image upload, exercise selection, inference, skeleton visualisation, feedback display and result image download |
+| Video pose estimation | Video upload, configurable frame sampling, asynchronous processing, progress polling and result video download |
+| Live-camera inference | WebSocket-based inference with an HTTP frame-inference fallback, displaying camera frames and skeleton overlays |
+| Detection history | Filtering, pagination, detail views, deletion, and CSV/Excel export through authenticated frontend requests |
+| Exercise history | Score and metric summaries filtered by exercise type |
+| Trend analysis | Score and key metric trends visualised with ECharts |
+| Profile management | `GET/PUT /api/auth/me/` for profile fields such as email and avatar, subject to the implemented endpoint |
 
-| 值 | 含义 |
-|----|------|
-| `squat` | 深蹲 |
-| `plank` | 平板支撑 |
-| `pushup` | 俯卧撑 |
-| `glute_bridge` | 臀桥 |
-| `situp` | 仰卧起坐 |
+### 1.2 Supported Exercise Types
 
-图片/视频推理请求中传入 `action_type`；未识别或非法值时后端会回退为默认动作（与 `views.py` 中 `_normalize_action_type` 行为一致）。
+The backend supports the following `action_type` values:
 
-### 1.3 管理员（`role_id === 1`）
+| Value | Exercise |
+| --- | --- |
+| `squat` | Squat |
+| `plank` | Plank |
+| `pushup` | Push-up |
+| `glute_bridge` | Glute bridge |
+| `situp` | Sit-up |
 
-- 用户列表（可按角色筛选）、检测记录、操作日志、模型指标列表与指标趋势图。
-- **普通用户 CRUD**：创建、查看、更新、删除普通用户（不可对管理员账号执行删除等敏感操作，详见后端实现）。
+Image and video inference requests can include `action_type`. Unrecognised or invalid values fall back to the default exercise, following `_normalize_action_type` in `views.py`.
 
----
+Image-based posture analysis evaluates the pose visible in an individual image; it does not establish the quality of an entire exercise sequence.
 
-## 2. 技术栈
+### 1.3 Administrator Features
 
-| 层级 | 技术 |
-|------|------|
-| 前端 | Vue 3、Vue Router、Vite 6、Element Plus、Axios、ECharts、`@element-plus/icons-vue` |
-| 后端 | Django 5、Django REST framework、Channels（WebSocket）、django-cors-headers |
-| 数据 | MySQL（PyMySQL）、Django ORM |
-| 推理与视觉 | MMPose、MMCV、MMEngine、MMDet、OpenCV、NumPy |
-| 安全与认证 | `python-jose`（JWT）、`passlib[bcrypt]` |
-| 其它 | `openpyxl`（Excel 导出）、`matplotlib` + `seaborn`（管理员指标图） |
-| 评分（可选） | 豆包等兼容 OpenAI 风格的 HTTP API（失败时有结构化兜底） |
+Administrator access uses `role_id === 1`.
 
----
+- User lists with role filtering, detection records and operation logs.
+- Model metric lists and metric trend plots.
+- Creation, viewing, updating and deletion of ordinary users. Restrictions on sensitive operations involving administrator accounts are defined in the backend implementation.
 
-## 3. 仓库目录结构（核心）
+## 2. Technology Stack
 
-```text
-final_project/
-├── backend_django/              # Django 工程
-│   ├── apps/pose/
-│   │   ├── services/          # 推理、可视化、姿态分析、LLM 评分、DB 写入
-│   │   ├── views.py           # REST + 部分视图逻辑（鉴权、推理、历史、管理）
-│   │   ├── urls.py
-│   │   ├── models.py
-│   │   ├── consumers.py       # WebSocket 实时推理（若已启用）
-│   │   └── management/commands/   # 如 init_pose_system
-│   ├── config/                # settings / urls / asgi / wsgi
-│   ├── tools/                 # 离线推理脚本等
-│   ├── media/                 # 上传与结果文件（运行时生成，勿随意删）
-│   ├── requirements.txt
-│   └── .env.example             # 环境变量示例（勿提交真实密钥）
-├── frontend_vue/               # Vue 3 + Vite
-│   ├── src/
-│   │   ├── api/               # Axios 封装（含 Bearer Token）
-│   │   ├── views/             # 各业务页面
-│   │   ├── router.js
-│   │   ├── App.vue
-│   │   └── stores/
-│   ├── vite.config.js         # dev server: host 0.0.0.0，/api 与 /ws 代理到后端
-│   └── package.json
-├── model_artifacts/            # 模型配置与权重（路径需与环境变量一致）
-├── start_all.ps1 / start_all.bat / stop_all.ps1   # Windows 一键启停
-├── final_project_cpu_test/   # 可选：本地 CPU 冒烟测试与独立 venv 脚本
-├── train_server/             # 可选：训练与数据处理脚本
-├── coco-wholebody/           # 可选：数据集（体积大，通常不纳入 Git）
-├── workspace/                # 可选：实验输出目录
-└── README.md
-```
+| Layer | Technologies |
+| --- | --- |
+| Frontend | Vue 3, Vue Router, Vite 6, Element Plus, Axios, ECharts, `@element-plus/icons-vue` |
+| Backend | Django 5, Django REST framework, Channels, django-cors-headers |
+| Database | MySQL, PyMySQL, Django ORM |
+| Pose estimation and vision | PyTorch, MMPose, MMCV, MMEngine, MMDetection, OpenCV, NumPy |
+| Authentication | `python-jose` for JWT, `passlib[bcrypt]` |
+| Export and plotting | `openpyxl`, Matplotlib, Seaborn |
+| Optional LLM feedback | Doubao through an OpenAI-style chat completions HTTP API, with structured fallback responses |
 
----
+## 3. Repository Structure
 
-## 4. 环境要求
+Paths below are relative to the repository root.
 
-- **操作系统**：Windows 10/11（一键脚本为 PowerShell）
-- **Python**：3.10+（与 Django 5 兼容）
-- **Node.js**：18+（建议 LTS）
-- **MySQL**：8.x（或兼容版本），提前创建数据库用户与库
-- **硬件**：CPU 可跑；GPU 需在环境与 `MODEL_DEVICE` 中配置
+| Path | Purpose |
+| --- | --- |
+| `backend_django/` | Django backend |
+| `backend_django/apps/pose/services/` | Inference, visualisation, geometric analysis, LLM feedback and database services |
+| `backend_django/apps/pose/views.py` | Authentication, inference, history and administration endpoints |
+| `backend_django/apps/pose/consumers.py` | WebSocket inference handling |
+| `backend_django/apps/pose/management/commands/` | Initialisation commands, including `init_pose_system` |
+| `backend_django/config/` | Django settings, URL configuration, ASGI and WSGI |
+| `backend_django/tools/` | Offline inference utilities |
+| `backend_django/requirements.txt` | Backend dependencies |
+| `backend_django/.env.example` | Example environment configuration |
+| `frontend_vue/` | Vue 3 and Vite frontend |
+| `frontend_vue/src/api/` | API clients, including Bearer token handling |
+| `frontend_vue/src/views/` | Application pages |
+| `frontend_vue/vite.config.js` | Development server and backend proxy configuration |
+| `model_artifacts/` | Model configuration and demonstration images; weights are excluded |
+| `my_experiments/` | Experiment configuration |
+| `train_server/` | Training, environment setup and dataset preparation scripts |
+| `final_project_cpu_test/` | CPU smoke-test utilities and setup instructions |
+| `start_all.ps1`, `start_all.bat`, `stop_all.ps1` | Windows startup and shutdown scripts |
+| `README.md` | Project documentation |
 
----
+Local directories such as `coco-wholebody/`, `backend_django/media/`, frontend dependencies and CPU test outputs are excluded by `.gitignore`.
 
-## 5. 安装步骤
+## 4. Requirements
 
-### 5.1 后端
+- **Operating system:** Windows 10/11 for the provided PowerShell startup scripts.
+- **Python:** 3.10 or later, with versions compatible with Django and the selected OpenMMLab stack.
+- **Node.js:** A version compatible with Vite 6 and the dependencies in `frontend_vue/package.json`.
+- **Database:** MySQL 8.x or a compatible version, with a database and user created before migration.
+- **Hardware:** A compatible GPU environment for GPU inference; CPU smoke-test utilities are provided separately.
+- **Model checkpoint:** Compatible RTMW-M weights matching the supplied configuration.
+
+PyTorch, CUDA, MMCV, MMEngine, MMPose and MMDetection versions must be compatible with one another. See the environment setup scripts and dependency files for the intended setup.
+
+## 5. Installation
+
+### 5.1 Clone the Repository
 
 ```powershell
-cd d:\final_project\backend_django
+git clone https://github.com/Blueee-sudo/Deep-Learning-Based-Whole-Body-Pose-Estimation-System.git
+cd .\Deep-Learning-Based-Whole-Body-Pose-Estimation-System
+```
+
+### 5.2 Backend
+
+From the repository root:
+
+```powershell
+cd .\backend_django
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-复制并编辑环境变量（不要提交含真实密码的 `.env` 到公开仓库）：
+Edit `.env` with your local database credentials, secret key and model configuration. Do not commit actual credentials.
+
+**Environment loading:** The shared Django settings use `os.getenv(...)`. Creating a `.env` file alone does not load its contents into the process environment. Confirm whether the startup scripts load it; otherwise set the required environment variables in the PowerShell session that launches Django.
+
+For example, replace the placeholders before running:
 
 ```powershell
-copy .env.example .env
-# 编辑 .env：数据库、SECRET_KEY、模型路径、JWT、豆包 API 等
+$env:DB_NAME = "pose_system"
+$env:DB_USER = "your-database-user"
+$env:DB_PASSWORD = "your-local-database-password"
+$env:SECRET_KEY = "your-local-secret-key"
+$env:ALLOWED_HOSTS = "127.0.0.1,localhost"
 ```
 
-数据库迁移与初始化角色/管理员：
+Before using optional LLM feedback, also configure `DOUBAO_API_KEY` and `DOUBAO_MODEL` in the backend process environment.
+
+Create the database in MySQL, then run:
 
 ```powershell
 python manage.py migrate
 python manage.py init_pose_system
 ```
 
-### 5.2 前端
+Review the initialisation command and set the `INIT_ADMIN_*` variables as required before creating the administrator account.
+
+### 5.3 Model Configuration and Checkpoint
+
+The default configuration is:
+
+```text
+model_artifacts/rtmw_m_wholebody_256x192_a10_finetune.py
+```
+
+The default checkpoint location is:
+
+```text
+model_artifacts/best_coco-wholebody_AP_epoch_1.pth
+```
+
+**The checkpoint is excluded from this repository.** Supply the trained checkpoint locally or configure a compatible checkpoint and matching configuration. Evaluation results reported above refer to the project's selected fine-tuned checkpoint.
+
+For custom locations, set `MODEL_NAME` and `MODEL_CHECKPOINT`. Absolute paths avoid ambiguity about the working directory. Set `MODEL_DEVICE` to match the available hardware, such as `cuda:0` or `cpu`.
+
+### 5.4 Frontend
+
+Open another PowerShell terminal at the repository root:
 
 ```powershell
-cd d:\final_project\frontend_vue
+cd .\frontend_vue
 npm install
 ```
 
-### 5.3 Excel 导出
+### 5.5 Excel Export
 
-历史记录导出 Excel 依赖后端 `openpyxl`；已在 `requirements.txt` 中。若自行精简依赖导致缺失，导出 xlsx 会失败。
+Excel export requires `openpyxl`, which is included in the backend requirements. Removing it from a customised installation will cause XLSX export to fail.
 
----
+## 6. Running the Application
 
-## 6. 运行方式
+### 6.1 Windows Startup Scripts
 
-### 6.1 一键启动（推荐，Windows）
+Run from the repository root after reviewing the scripts and configuring the local environment:
 
 ```powershell
-cd d:\final_project
-powershell -ExecutionPolicy Bypass -File .\stop_all.ps1
 powershell -ExecutionPolicy Bypass -File .\start_all.ps1
 ```
 
-脚本会打开新窗口分别运行后端（迁移 + `init_pose_system` + `runserver`）与前端（`npm run dev`）。**请勿将 `start_all.ps1` 中的数据库口令、豆包 API Key、管理员密码提交到公共仓库**；生产环境应改为本机环境变量或密钥管理注入。
-
-默认访问：
-
-- 前端开发服务器：`http://localhost:5173`（`vite.config.js` 中 `host: "0.0.0.0"`，局域网可用本机 IPv4 + `:5173` 访问，需放行防火墙）
-- 后端 API：`http://127.0.0.1:8000`（与 Vite 代理目标一致）
-
-### 6.2 手动启动
-
-**后端：**
+To stop the application:
 
 ```powershell
-cd d:\final_project\backend_django
-python manage.py migrate
-python manage.py init_pose_system
-python manage.py runserver 0.0.0.0:8000
+powershell -ExecutionPolicy Bypass -File .\stop_all.ps1
 ```
 
-**前端：**
+The startup script opens separate windows for the backend and frontend. Its documented workflow includes database migration, account initialisation, Django development-server startup and `npm run dev`.
+
+Do not store actual database passwords, API keys or administrator passwords in tracked startup scripts.
+
+Default development URLs:
+
+| Service | URL |
+| --- | --- |
+| Frontend | `http://localhost:5173` |
+| Backend | `http://127.0.0.1:8000` |
+
+The Vite configuration proxies `/api` and `/ws` requests to the backend. Its `0.0.0.0` host setting permits LAN access when networking and firewall rules allow it.
+
+### 6.2 Manual Startup
+
+In a backend terminal, activate the environment and set the required variables first:
 
 ```powershell
-cd d:\final_project\frontend_vue
+cd .\backend_django
+.\.venv\Scripts\Activate.ps1
+python manage.py migrate
+python manage.py init_pose_system
+python manage.py runserver 127.0.0.1:8000
+```
+
+In a separate terminal at the repository root:
+
+```powershell
+cd .\frontend_vue
 npm run dev
 ```
 
-生产构建：
+To build and preview the frontend:
 
 ```powershell
-cd d:\final_project\frontend_vue
 npm run build
 npm run preview
 ```
 
----
+The preview command previews the frontend build; it does not start the Django backend.
 
-## 7. 前端路由一览
+## 7. Frontend Routes
 
-| 路径 | 页面 | 说明 |
-|------|------|------|
-| `/` | 重定向 | 默认跳到 `/image` |
-| `/auth` | 认证入口 | 登录 / 注册 |
-| `/login`、`/register` | 旧路由 | 重定向到 `/auth` |
-| `/home` | 首页 | 需登录 |
-| `/image` | 图片检测 | 需登录 |
-| `/video` | 视频姿态检测 | 需登录 |
-| `/realtime` | 实时检测 | 需登录 |
-| `/history` | 检测历史 | 需登录 |
-| `/pose-history` | 动作历史 | 需登录 |
-| `/pose-trends` | 趋势分析 | 需登录 |
-| `/admin` | 管理员 | 需登录且管理员角色 |
+| Path | Page | Access |
+| --- | --- | --- |
+| `/` | Redirects to `/image` | Subject to authentication guards |
+| `/auth` | Login and registration | Authentication entry point |
+| `/login`, `/register` | Redirect to `/auth` | Legacy routes |
+| `/home` | Home | Login required |
+| `/image` | Image inference | Login required |
+| `/video` | Video pose estimation | Login required |
+| `/realtime` | Live-camera inference | Login required |
+| `/history` | Detection history | Login required |
+| `/pose-history` | Exercise history | Login required |
+| `/pose-trends` | Trend analysis | Login required |
+| `/admin` | Administrator dashboard | Administrator login required |
 
----
+## 8. Backend API Summary
 
-## 8. 后端 API 摘要
+REST endpoints use the `/api/` prefix. During development, frontend requests are proxied by Vite.
 
-前缀均为 `/api/`（开发模式下由 Vite 代理到 Django）。
+### Authentication
 
-### 认证
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| POST | `/api/auth/register/` | Register a user |
+| POST | `/api/auth/login/` | Log in |
+| GET, PUT | `/api/auth/me/` | Retrieve or update the current user's profile |
 
-- `POST /api/auth/register/`
-- `POST /api/auth/login/`
-- `GET /api/auth/me/`、`PUT /api/auth/me/`
+### Pose Inference
 
-### 姿态推理
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| POST | `/api/pose/image/` | Image inference using multipart `file` and `action_type` |
+| GET | `/api/pose/image/{detection_id}/result/` | Retrieve an image result |
+| POST | `/api/pose/video/` | Submit a video, with parameters such as `frame_stride` |
+| GET | `/api/pose/video/{detection_id}/progress/` | Retrieve processing progress |
+| GET | `/api/pose/video/{detection_id}/result/` | Retrieve the video result |
+| POST | `/api/pose/realtime/frame/` | HTTP fallback inference using a Base64 frame |
 
-- `POST /api/pose/image/`（`multipart`：`file`、`action_type`）
-- `GET /api/pose/image/{detection_id}/result/`
-- `POST /api/pose/video/`（视频 + `frame_stride` 等）
-- `GET /api/pose/video/{detection_id}/progress/`
-- `GET /api/pose/video/{detection_id}/result/`
-- `POST /api/pose/realtime/frame/`（Base64 帧，HTTP 回退场景）
-- WebSocket：`/ws/...`（以 `routing.py` 与实际前端连接为准）
+WebSocket routes use `/ws/...`; refer to `routing.py` and the frontend connection code for the exact path.
 
-### 历史与动作
+### History
 
-- `GET /api/history/`（分页与筛选参数与前端一致）
-- `GET /api/history/export/?fmt=csv|excel`（需 **Authorization: Bearer**；筛选参数可与列表一致）
-- `GET /api/history/{detection_id}/`
-- `DELETE /api/history/{detection_id}/delete/`
-- `GET /api/pose/history/`（动作历史，`action_type` 可选）
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| GET | `/api/history/` | List detection history with pagination and filtering |
+| GET | `/api/history/export/?fmt=csv` | Export CSV |
+| GET | `/api/history/export/?fmt=excel` | Export Excel |
+| GET | `/api/history/{detection_id}/` | Retrieve a detection record |
+| DELETE | `/api/history/{detection_id}/delete/` | Delete a detection record |
+| GET | `/api/pose/history/` | Retrieve exercise history, optionally filtered by `action_type` |
 
-### 管理员
+Export requests require an `Authorization: Bearer <token>` header. Filtering parameters can match those used for the history list.
 
-- `GET /api/admin/users/`、`POST /api/admin/users/`（创建普通用户）
-- `GET|PUT|DELETE /api/admin/users/{user_id}/`（查看 / 更新 / 删除普通用户）
-- `GET /api/admin/detections/`
-- `GET /api/admin/logs/`
-- `GET|POST /api/admin/metrics/`
-- `GET /api/admin/metrics/plot/`
+### Administration
 
----
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| GET, POST | `/api/admin/users/` | List users or create an ordinary user |
+| GET, PUT, DELETE | `/api/admin/users/{user_id}/` | Retrieve, update or delete an ordinary user |
+| GET | `/api/admin/detections/` | List detection records |
+| GET | `/api/admin/logs/` | List operation logs |
+| GET, POST | `/api/admin/metrics/` | Retrieve or add model metrics |
+| GET | `/api/admin/metrics/plot/` | Retrieve metric plots |
 
-## 9. 核心代码位置（便于维护）
+## 9. Core Implementation
 
-| 模块 | 路径 | 职责 |
-|------|------|------|
-| 推理入口 | `apps/pose/services/inferencer.py` | MMPose 整图推理，输出 `persons`、耗时等 |
-| 骨架绘制 | `apps/pose/services/visualizer.py` | 133 点可视化叠加 |
-| 动作几何分析 | `apps/pose/services/pose_analysis.py` | 五种动作的结构化指标与阶段 |
-| LLM 评分 | `apps/pose/services/llm_scoring.py` | 按动作组装提示词，调用外部 API，失败兜底 |
-| 持久化摘要 | `apps/pose/services/db_service.py` | 检测记录、关键点、动作结果与指标摘要 |
-| HTTP API | `apps/pose/views.py` | 鉴权、业务聚合、管理员用户管理等 |
-| 前端 API | `frontend_vue/src/api/*.js` | 与后端路径、方法对齐 |
+Backend service paths below are relative to `backend_django/`.
 
----
+| Module | Path | Responsibility |
+| --- | --- | --- |
+| Inference | `apps/pose/services/inferencer.py` | MMPose inference, person results and timing information |
+| Skeleton visualisation | `apps/pose/services/visualizer.py` | Overlay of 133 keypoints |
+| Geometric analysis | `apps/pose/services/pose_analysis.py` | Structured exercise metrics and pose-stage analysis for five exercise types |
+| Optional LLM feedback | `apps/pose/services/llm_scoring.py` | Exercise-specific prompts, external API calls and fallback handling |
+| Persistence | `apps/pose/services/db_service.py` | Detection records, keypoints, analysis results and metric summaries |
+| HTTP API | `apps/pose/views.py` | Authentication, inference workflows, history and administration |
+| Frontend API | `frontend_vue/src/api/*.js` | Client requests aligned with backend endpoints; path relative to repository root |
 
-## 10. 配置说明（环境变量）
+## 10. Environment Variables
 
-在 `backend_django/config/settings.py` 及业务代码中会读取的典型变量包括：
+| Category | Variables |
+| --- | --- |
+| Django | `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` |
+| Database | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` |
+| Model | `MODEL_NAME`, `MODEL_CHECKPOINT`, `MODEL_DISPLAY_NAME`, `MODEL_DEVICE`, `CONFIDENCE_THRESHOLD` |
+| Video sampling | `VIDEO_INFER_FRAME_STRIDE` |
+| JWT | `JWT_SECRET_KEY`, `JWT_ALGORITHM`, `JWT_EXPIRE_MINUTES` |
+| Optional feedback | `DOUBAO_API_KEY`, `DOUBAO_MODEL`, `DOUBAO_BASE_URL`, `DOUBAO_TIMEOUT` |
+| Account initialisation | `INIT_ADMIN_USERNAME`, `INIT_ADMIN_EMAIL`, `INIT_ADMIN_PASSWORD` |
 
-- **数据库**：`DB_HOST`、`DB_PORT`、`DB_NAME`、`DB_USER`、`DB_PASSWORD`
-- **模型**：`MODEL_NAME`（RTMW-M 微调配置文件路径）、`MODEL_CHECKPOINT`（如 `best_coco-wholebody_AP_epoch_1.pth`）、`MODEL_DISPLAY_NAME`（记录用标识）、`MODEL_DEVICE`、`CONFIDENCE_THRESHOLD`
-- **视频**：`VIDEO_INFER_FRAME_STRIDE`
-- **JWT**：`JWT_SECRET_KEY`、`JWT_ALGORITHM`、`JWT_EXPIRE_MINUTES`
-- **评分服务**：`DOUBAO_API_KEY`、`DOUBAO_MODEL`、`DOUBAO_BASE_URL`、`DOUBAO_TIMEOUT`（名称以代码为准）
-- **初始化管理员**：`INIT_ADMIN_USERNAME`、`INIT_ADMIN_EMAIL`、`INIT_ADMIN_PASSWORD`（仅初始化脚本使用）
+`MODEL_NAME` specifies the configuration path; `MODEL_DISPLAY_NAME` is the label stored in records. `VIDEO_INFER_FRAME_STRIDE=1` requests inference on every frame, while larger values reduce the sampling frequency.
 
-完整示例以 `.env.example` 与 `settings.py` 为准。
+Use `.env.example`, `settings.py` and the relevant service or initialisation code as references for defaults and supported options.
 
----
+## 11. Utilities and Training
 
-## 11. 辅助与扩展
+### 11.1 Offline Image Inference
 
-### 11.1 离线单图推理（示例）
+From `backend_django/`, with the required environment and model configured:
 
 ```powershell
-cd d:\final_project\backend_django
 python tools\offline_infer_and_visualize.py --input demo.jpg --output outputs\demo_result.jpg
 ```
 
-### 11.2 CPU 冒烟测试
+Replace the input and output paths as needed.
+
+### 11.2 CPU Smoke Test
+
+From the repository root, after following the CPU environment setup instructions:
 
 ```powershell
-cd d:\final_project
 python final_project_cpu_test\run_cpu_smoke_test.py --samples 5
 ```
 
-详见 `final_project_cpu_test/README.md`。
+See `final_project_cpu_test/README.md` for setup and test details. Smoke tests check basic execution; they do not replace model evaluation.
 
-### 11.3 训练脚本
+### 11.3 Training Scripts
 
-`train_server/` 下为服务器侧训练、数据与验证相关脚本，与主站运行无强耦合。
+`train_server/` contains server-side environment setup, dataset preparation, configuration generation, training, resume and inference scripts. These utilities are separate from the web application's runtime workflow.
 
----
+The COCO-WholeBody dataset must be obtained and prepared separately. Training outputs and checkpoints are managed locally rather than included in this repository.
 
-## 12. 常见问题
+## 12. Troubleshooting
 
-1. **手机无法访问电脑上的 `http://IP:5173`**  
-   换热点后 IP 会变化；用 `ipconfig` 查看当前 IPv4。若电脑可访问而手机不可，检查 Windows 防火墙是否放行 TCP `5173`。部分手机开热点时限制终端互访，可改为电脑开热点或同一路由器 Wi-Fi。
+| Issue | Suggested checks |
+| --- | --- |
+| A phone cannot access the frontend | Verify the computer's current IPv4 address using `ipconfig`, check TCP port 5173 in Windows Firewall, and confirm that both devices can communicate on the network. Some phone hotspots restrict communication between clients. |
+| CSV or Excel export does not work | Use the authenticated frontend download request. Opening the endpoint directly may omit the required Bearer token. Check that `openpyxl` is installed for Excel export. |
+| Video processing fails | Try an H.264-encoded MP4 and check OpenCV decoding support. |
+| Feedback returns a fallback message | Check `DOUBAO_*` environment variables, network access and API quota. Geometric analysis can be demonstrated without the optional LLM service. |
+| Model loading fails | Check checkpoint availability, configuration/checkpoint compatibility, resolved paths, installed OpenMMLab versions and `MODEL_DEVICE`. |
+| Values in `.env` are not taking effect | Confirm that a startup component loads the file, or set the variables in the backend process environment. `os.getenv` does not load `.env` automatically. |
 
-2. **导出 CSV/Excel 无反应**  
-   导出必须由带 Token 的前端请求触发（不能直接粘贴无 Cookie 的浏览器地址）。若 Excel 报错，确认已安装 `openpyxl`。
+## 13. Development Configuration and Repository Hygiene
 
-3. **视频无法处理**  
-   优先使用 H.264 编码的 MP4，降低 OpenCV 解码失败概率。
+- Keep actual database passwords, JWT secrets and API keys out of tracked code, configuration examples and startup scripts.
+- Keep datasets, checkpoints, virtual environments, `node_modules`, build output, caches and runtime media outside version control using `.gitignore`.
+- Review changes before committing, particularly scripts and configuration files.
+- The provided Django defaults are intended for local development. Public deployment requires appropriate secret management, `DEBUG=False`, restricted hosts and CORS, and a suitable application-server setup.
 
-4. **评分一直为兜底文案**  
-   检查豆包相关环境变量、网络与配额；未配置时系统仍可演示几何分析部分。
+## 14. Documentation Maintenance
 
----
-
-## 13. 安全与仓库卫生
-
-- 不要将 **生产数据库密码、JWT 密钥、第三方 API Key** 写入 Git 跟踪文件。
-- `node_modules`、`dist`、Python `__pycache__`、本地 `.venv` 等应由 `.gitignore` 排除（若尚未配置，请补充）。
-- 超大数据集（如 `coco-wholebody`）与实验输出（如 `workspace`）建议单独备份，不必纳入版本库。
-
----
-
-## 14. 文档维护
-
-本 README 与当前主分支功能对齐：**五种动作**、**管理员普通用户管理**、**认证入口 `/auth`**、**历史导出需鉴权** 等。若接口或目录有较大变更，请同步更新本节与上文表格。
+Update this README when routes, configuration, directory structure or behaviour change. The documented functionality includes five exercise types, ordinary-user administration, the unified `/auth` page and authenticated history export.
