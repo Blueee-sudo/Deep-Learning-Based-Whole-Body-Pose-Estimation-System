@@ -1,0 +1,18 @@
+/* 消除默认边距导致的 100vh + margin 溢出滚动条 */
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+#app {
+  height: 100%;
+}
+
+/* 仅认证页：禁止页面级滚动（保留内部可滚动区域需单独设 overflow:auto） */
+html.auth-page-lock-scroll,
+html.auth-page-lock-scroll body {
+  overflow: hidden;
+  height: 100%;
+  overscroll-behavior: none;
+}
